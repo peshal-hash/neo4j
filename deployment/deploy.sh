@@ -136,7 +136,7 @@ deploy_infrastructure() {
       storageKeySecretName="$STORAGE_KEY_SECRET_NAME" \
       exposeBoltExternally="$EXPOSE_BOLT_EXTERNALLY" \
       configureEnvStorage="${CONFIGURE_ENV_STORAGE:-true}" \
-      createStorage="${CREATE_STORAGE:-true}" \
+      createStorage="${CREATE_STORAGE:-false}" \
     "${debug_flag[@]}" \
     2> >(tee "${AZ_ERR_LOG}" >&2)
 

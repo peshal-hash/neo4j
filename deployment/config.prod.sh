@@ -20,7 +20,7 @@ NEO4J_AUTH_SECRET_NAME="NEO4J-AUTH"
 STORAGE_KEY_SECRET_NAME="NEO4J-STORAGE-KEY"  # value is storage account key
 
 # Azure Files
-STORAGE_ACCOUNT_NAME="neo4jstg${UNIQUE_ID}"   # UNIQUE_ID is already generated in your config
+STORAGE_ACCOUNT_NAME="neo4jstg0d55fd18"   # UNIQUE_ID is already generated in your config
 FILE_SHARE_NAME="neo4jfiles"
 
 # Networking
