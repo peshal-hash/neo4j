@@ -86,6 +86,18 @@ configure_from_env() {
   set_config_from_env "NEO4J_server_memory_heap_max__size" "server.memory.heap.max_size"
 }
 
+clear_stale_locks() {
+  local data_dir="${NEO4J_server_directories_data:-/data}"
+  local db_dir="${data_dir}/databases"
+
+  if [[ -d "${db_dir}" ]]; then
+    find "${db_dir}" -name "store_lock" -type f | while read -r lock_file; do
+      echo "Removing stale store_lock: ${lock_file}" >&2
+      rm -f "${lock_file}"
+    done
+  fi
+}
+
 force_reset_auth_if_requested() {
   local reset_auth="${NEO4J_FORCE_RESET_AUTH:-false}"
   case "${reset_auth,,}" in
@@ -132,6 +144,7 @@ configure_paths_and_network
 configure_from_env
 force_reset_auth_if_requested
 configure_auth
+clear_stale_locks
 
 if [[ "$#" -gt 0 ]]; then
   exec "$@"
