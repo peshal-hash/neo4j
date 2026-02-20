@@ -1,4 +1,4 @@
-// neo4j-with-storage-create.bicep
+// neo4j-with-storage-create.bicep (NO storage key stored/created by Bicep)
 
 param location string
 param environmentName string
@@ -13,13 +13,19 @@ param imageTag string = 'latest'
 @description('Key Vault secret name whose VALUE is like "neo4j/YourStrongPassword"')
 param neo4jAuthSecretName string = 'NEO4J-AUTH'
 
+@description('If true, create a new Storage Account + File Share. NOTE: this template will NOT store its key anywhere.')
 param createStorage bool = true
+
 @description('Optional: If createStorage=false, provide an existing storage account name (lowercase, 3-24 chars).')
 param storageAccountName string = ''
+
 param fileShareName string = 'neo4jfiles'
 
-@description('Key Vault secret name containing the Storage Account KEY (for Azure Files mount)')
+@description('Key Vault secret name that ALREADY contains the Storage Account KEY (for Azure Files mount). This template will NOT create/update it.')
 param storageKeySecretName string = 'NEO4J-STORAGE-KEY'
+
+@description('If true, configure Managed Environment storage (Azure Files mount) + mount it in Neo4j container. Requires Key Vault secret to already exist.')
+param configureEnvStorage bool = true
 
 @description('Expose Bolt (7687) externally. External TCP ingress may require special env/network setup.')
 param exposeBoltExternally bool = false
@@ -46,7 +52,6 @@ resource env 'Microsoft.App/managedEnvironments@2023-05-01' existing = {
 // -------------------------
 // Storage: create (or use existing)
 // -------------------------
-// FIX: uniqueString is 13 chars; do NOT substring to 18.
 var generatedStorageName = toLower('st${uniqueString(resourceGroup().id, neo4jAppName)}')
 var storageName = empty(storageAccountName) ? generatedStorageName : toLower(storageAccountName)
 
@@ -73,22 +78,12 @@ resource fileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-0
   }
 }
 
-// Read key only when creating storage
-var storageKey = createStorage ? storage.listKeys().keys[0].value : ''
-
-// Store the storage key in Key Vault when we created it
-resource storageKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = if (createStorage) {
-  name: '${keyVault.name}/${storageKeySecretName}'
-  properties: {
-    value: storageKey
-  }
-}
-
 // -------------------------
 // Managed Environment Storage (Azure Files)
-// IMPORTANT: Use API that supports accountKeyVaultProperties
+// NOTE: We DO NOT create/write the storage key secret here.
+// It must already exist in Key Vault as: https://{vault}.vault.azure.net/secrets/{storageKeySecretName}
 // -------------------------
-resource envStorage 'Microsoft.App/managedEnvironments/storages@2025-07-01' = {
+resource envStorage 'Microsoft.App/managedEnvironments/storages@2025-07-01' = if (configureEnvStorage) {
   name: 'neo4jstorage'
   parent: env
   properties: {
@@ -104,7 +99,6 @@ resource envStorage 'Microsoft.App/managedEnvironments/storages@2025-07-01' = {
   }
   dependsOn: createStorage ? [
     fileShare
-    storageKeySecret
   ] : []
 }
 
@@ -159,12 +153,11 @@ resource neo4jApp 'Microsoft.App/containerApps@2025-10-02-preview' = {
           image: '${acr.properties.loginServer}/${imageRepo}:${imageTag}'
           resources: { cpu: json('2.0'), memory: '4.0Gi' }
 
-          // Single mount at /data, then keep everything inside /data/* so it persists.
           env: [
             { name: 'NEO4J_AUTH', secretRef: 'neo4j-auth' }
-
             { name: 'NEO4J_server_default__listen__address', value: '0.0.0.0' }
 
+            // Keep everything under /data so it persists when mounted
             { name: 'NEO4J_server_directories_data', value: '/data' }
             { name: 'NEO4J_server_directories_logs', value: '/data/logs' }
             { name: 'NEO4J_server_directories_import', value: '/data/import' }
@@ -175,28 +168,27 @@ resource neo4jApp 'Microsoft.App/containerApps@2025-10-02-preview' = {
             { name: 'NEO4J_server_memory_heap_max__size', value: '512m' }
           ]
 
-          volumeMounts: [
+          volumeMounts: configureEnvStorage ? [
             { volumeName: 'neo4jfiles', mountPath: '/data' }
-          ]
+          ] : []
         }
       ]
 
-      volumes: [
+      volumes: configureEnvStorage ? [
         {
           name: 'neo4jfiles'
           storageType: 'AzureFile'
-          // FIX: must be the ENV storage resource name, not storage account name
-          storageName: 'neo4jstorage'
+          storageName: 'neo4jstorage' // must match envStorage.name
           mountOptions: 'uid=7474,gid=7474,file_mode=0777,dir_mode=0777'
         }
-      ]
+      ] : []
 
       scale: { minReplicas: 1, maxReplicas: 1 }
     }
   }
-  dependsOn: [
+  dependsOn: configureEnvStorage ? [
     envStorage
-  ]
+  ] : []
 }
 
 output neo4jBrowserUrl string = 'https://${fqdn}'
