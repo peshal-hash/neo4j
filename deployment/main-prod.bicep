@@ -30,6 +30,9 @@ param configureEnvStorage bool = true
 @description('Expose Bolt (7687) externally. External TCP ingress may require special env/network setup.')
 param exposeBoltExternally bool = true
 
+@description('If true, remove existing /data/dbms/auth* files at startup so NEO4J_AUTH can be reapplied. Use only when intentionally rotating/resetting credentials.')
+param forceResetAuth bool = false
+
 // -------------------------
 // Existing resources
 // -------------------------
@@ -103,6 +106,7 @@ resource envStorage 'Microsoft.App/managedEnvironments/storages@2025-07-01' = if
 }
 
 var fqdn = '${neo4jAppName}.${env.properties.defaultDomain}'
+var boltAdvertisedAddress = exposeBoltExternally ? '${fqdn}:7687' : '${neo4jAppName}:7687'
 
 // -------------------------
 // Neo4j Container App
@@ -156,6 +160,12 @@ resource neo4jApp 'Microsoft.App/containerApps@2025-10-02-preview' = {
           env: [
             { name: 'NEO4J_AUTH', secretRef: 'neo4j-auth' }
             { name: 'NEO4J_server_default__listen__address', value: '0.0.0.0' }
+            { name: 'NEO4J_server_default__advertised__address', value: fqdn }
+            { name: 'NEO4J_server_bolt_listen__address', value: ':7687' }
+            { name: 'NEO4J_server_bolt_advertised__address', value: boltAdvertisedAddress }
+            { name: 'NEO4J_server_http_listen__address', value: ':7474' }
+            { name: 'NEO4J_server_http_advertised__address', value: '${fqdn}:443' }
+            { name: 'NEO4J_FORCE_RESET_AUTH', value: forceResetAuth ? 'true' : 'false' }
 
             // Keep everything under /data so it persists when mounted
             { name: 'NEO4J_server_directories_data', value: '/data' }

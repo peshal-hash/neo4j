@@ -68,10 +68,32 @@ configure_paths_and_network() {
 }
 
 configure_from_env() {
+  set_config_from_env "NEO4J_server_default__listen__address" "server.default_listen_address"
+  set_config_from_env "NEO4J_server_default__advertised__address" "server.default_advertised_address"
+  set_config_from_env "NEO4J_server_bolt_listen__address" "server.bolt.listen_address"
+  set_config_from_env "NEO4J_server_bolt_advertised__address" "server.bolt.advertised_address"
+  set_config_from_env "NEO4J_server_http_listen__address" "server.http.listen_address"
+  set_config_from_env "NEO4J_server_http_advertised__address" "server.http.advertised_address"
+  set_config_from_env "NEO4J_server_https_listen__address" "server.https.listen_address"
+  set_config_from_env "NEO4J_server_https_advertised__address" "server.https.advertised_address"
+  set_config_from_env "NEO4J_server_bolt_tls__level" "server.bolt.tls_level"
+  set_config_from_env "NEO4J_server_directories_data" "server.directories.data"
+  set_config_from_env "NEO4J_server_directories_logs" "server.directories.logs"
   set_config_from_env "NEO4J_server_directories_import" "server.directories.import"
+  set_config_from_env "NEO4J_server_directories_plugins" "server.directories.plugins"
   set_config_from_env "NEO4J_dbms_security_allow__csv__import__from__file__urls" "dbms.security.allow_csv_import_from_file_urls"
   set_config_from_env "NEO4J_server_memory_heap_initial__size" "server.memory.heap.initial_size"
   set_config_from_env "NEO4J_server_memory_heap_max__size" "server.memory.heap.max_size"
+}
+
+force_reset_auth_if_requested() {
+  local reset_auth="${NEO4J_FORCE_RESET_AUTH:-false}"
+  case "${reset_auth,,}" in
+    1|true|yes|on)
+      echo "NEO4J_FORCE_RESET_AUTH is enabled; removing existing auth files." >&2
+      rm -f /data/dbms/auth /data/dbms/auth.ini
+      ;;
+  esac
 }
 
 configure_auth() {
@@ -108,6 +130,7 @@ configure_auth() {
 ensure_runtime_permissions "$@"
 configure_paths_and_network
 configure_from_env
+force_reset_auth_if_requested
 configure_auth
 
 if [[ "$#" -gt 0 ]]; then

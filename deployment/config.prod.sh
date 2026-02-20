@@ -25,3 +25,8 @@ FILE_SHARE_NAME="neo4jfiles"
 
 # Networking
 EXPOSE_BOLT_EXTERNALLY="true"
+
+# Auth lifecycle
+# Keep "false" for normal deploys; set "true" only when you intentionally want
+# to clear current Neo4j auth state and reapply NEO4J_AUTH from Key Vault.
+FORCE_RESET_AUTH="false"
