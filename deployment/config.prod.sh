@@ -24,7 +24,7 @@ STORAGE_ACCOUNT_NAME="neo4jstg0d55fd18"   # UNIQUE_ID is already generated in yo
 FILE_SHARE_NAME="neo4jfiles"
 
 # Networking
-EXPOSE_BOLT_EXTERNALLY="true"
+EXPOSE_BOLT_EXTERNALLY="false"
 
 # Auth lifecycle
 # Keep "false" for normal deploys; set "true" only when you intentionally want

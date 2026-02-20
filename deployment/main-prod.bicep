@@ -28,7 +28,7 @@ param storageKeySecretName string = 'NEO4J-STORAGE-KEY'
 param configureEnvStorage bool = true
 
 @description('Expose Bolt (7687) externally. External TCP ingress may require special env/network setup.')
-param exposeBoltExternally bool = true
+param exposeBoltExternally bool = false
 
 @description('If true, remove existing /data/dbms/auth* files at startup so NEO4J_AUTH can be reapplied. Use only when intentionally rotating/resetting credentials.')
 param forceResetAuth bool = false
