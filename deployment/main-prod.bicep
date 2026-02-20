@@ -83,10 +83,26 @@ resource fileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-0
 
 // -------------------------
 // Managed Environment Storage (Azure Files)
-// NOTE: We DO NOT create/write the storage key secret here.
-// It must already exist in Key Vault as: https://{vault}.vault.azure.net/secrets/{storageKeySecretName}
+// When createStorage=true, we get the key directly from the new storage account
+// When createStorage=false, we read the key from Key Vault secret
 // -------------------------
-resource envStorage 'Microsoft.App/managedEnvironments/storages@2025-07-01' = if (configureEnvStorage) {
+resource envStorage 'Microsoft.App/managedEnvironments/storages@2025-07-01' = if (configureEnvStorage && createStorage) {
+  name: 'neo4jstorage'
+  parent: env
+  properties: {
+    azureFile: {
+      accountName: storageName
+      shareName: fileShareName
+      accessMode: 'ReadWrite'
+      accountKey: storage.listKeys().keys[0].value
+    }
+  }
+  dependsOn: [
+    fileShare
+  ]
+}
+
+resource envStorageExisting 'Microsoft.App/managedEnvironments/storages@2025-07-01' = if (configureEnvStorage && !createStorage) {
   name: 'neo4jstorage'
   parent: env
   properties: {
@@ -100,9 +116,6 @@ resource envStorage 'Microsoft.App/managedEnvironments/storages@2025-07-01' = if
       }
     }
   }
-  dependsOn: createStorage ? [
-    fileShare
-  ] : []
 }
 
 var fqdn = '${neo4jAppName}.${env.properties.defaultDomain}'
@@ -196,9 +209,11 @@ resource neo4jApp 'Microsoft.App/containerApps@2025-10-02-preview' = {
       scale: { minReplicas: 1, maxReplicas: 1 }
     }
   }
-  dependsOn: configureEnvStorage ? [
+  dependsOn: configureEnvStorage ? (createStorage ? [
     envStorage
-  ] : []
+  ] : [
+    envStorageExisting
+  ]) : []
 }
 
 output neo4jBrowserUrl string = 'https://${fqdn}'

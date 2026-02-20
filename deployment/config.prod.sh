@@ -19,8 +19,9 @@ NEO4J_CONTEXT=".."
 NEO4J_AUTH_SECRET_NAME="NEO4J-AUTH"
 STORAGE_KEY_SECRET_NAME="NEO4J-STORAGE-KEY"  # value is storage account key
 
-# Azure Files
-STORAGE_ACCOUNT_NAME="neo4jstg0d55fd18"   # UNIQUE_ID is already generated in your config
+CREATE_STORAGE="true"                    # Create new storage account
+CONFIGURE_ENV_STORAGE="true"             # Configure Azure Files mount
+STORAGE_ACCOUNT_NAME=""                  # Empty = let Bicep generate unique name
 FILE_SHARE_NAME="neo4jfiles"
 
 # Networking
