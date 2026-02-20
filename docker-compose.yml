@@ -16,6 +16,7 @@ services:
     restart: unless-stopped
     environment:
       - NEO4J_AUTH=${NEO4J_AUTH:-neo4j/password}
+      - NEO4J_FORCE_RESET_AUTH=true  # TEMPORARY: remove after successful login
       - NEO4J_server_directories_import=/import
       - NEO4J_dbms_security_allow__csv__import__from__file__urls=true
       - NEO4J_server_memory_heap_initial__size=512m
