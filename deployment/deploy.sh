@@ -153,6 +153,30 @@ build_and_push_image() {
   ok "Image pushed: ${ACR_SERVER}/${NEO4J_IMAGE_REPO}:${IMAGE_TAG}"
 }
 
+cleanup_existing_storage_config() {
+  info "Checking for existing managed environment storage 'neo4jstorage'..."
+  : > "${AZ_ERR_LOG}"
+
+  local storage_exists
+  storage_exists=$(az containerapp env storage show \
+    --name "${ENVIRONMENT_NAME}" \
+    --resource-group "${RESOURCE_GROUP}" \
+    --storage-name "neo4jstorage" \
+    --query "name" -o tsv 2> >(tee "${AZ_ERR_LOG}" >&2) || echo "")
+
+  if [[ -n "${storage_exists}" ]]; then
+    info "Found existing storage config. Removing to avoid update conflicts..."
+    az containerapp env storage remove \
+      --name "${ENVIRONMENT_NAME}" \
+      --resource-group "${RESOURCE_GROUP}" \
+      --storage-name "neo4jstorage" \
+      --yes 2> >(tee "${AZ_ERR_LOG}" >&2)
+    ok "Existing storage config removed."
+  else
+    ok "No existing storage config found. Proceeding with deployment."
+  fi
+}
+
 deploy_infrastructure() {
   info "Deploying Bicep to RG=${RESOURCE_GROUP} (env=${ENVIRONMENT_NAME})..."
   : > "${AZ_ERR_LOG}"
@@ -328,6 +352,7 @@ main() {
   az acr login --name "$ACR_NAME" 2> >(tee "${AZ_ERR_LOG}" >&2)
 
   build_and_push_image
+  cleanup_existing_storage_config
 
   local neo4j_url=""
   # IMPORTANT: do NOT use neo4j_url=$(...) without checking status.
