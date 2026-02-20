@@ -185,7 +185,7 @@ deploy_infrastructure() {
       exposeBoltExternally="$EXPOSE_BOLT_EXTERNALLY" \
       forceResetAuth="${FORCE_RESET_AUTH:-false}" \
       configureEnvStorage="${CONFIGURE_ENV_STORAGE:-true}" \
-      createStorage="${CREATE_STORAGE:-false}" \
+      createStorage="${CREATE_STORAGE:-ftruee}" \
     "${debug_flag[@]}" \
     2> >(tee "${AZ_ERR_LOG}" >&2)
 

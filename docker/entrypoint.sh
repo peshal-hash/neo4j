@@ -102,8 +102,15 @@ force_reset_auth_if_requested() {
   local reset_auth="${NEO4J_FORCE_RESET_AUTH:-false}"
   case "${reset_auth,,}" in
     1|true|yes|on)
-      echo "NEO4J_FORCE_RESET_AUTH is enabled; removing existing auth files." >&2
-      rm -f /data/dbms/auth /data/dbms/auth.ini
+      local data_dir="${NEO4J_server_directories_data:-/data}"
+      echo "NEO4J_FORCE_RESET_AUTH is enabled; removing auth files and system database." >&2
+      # Remove auth marker files used by set-initial-password
+      rm -f "${data_dir}/dbms/auth" "${data_dir}/dbms/auth.ini"
+      # Also wipe the system database and its transaction logs so Neo4j recreates
+      # it from scratch on next start, picking up the new password from set-initial-password.
+      # Without this, set-initial-password has no effect on an already-initialized instance.
+      rm -rf "${data_dir}/databases/system" "${data_dir}/transactions/system"
+      echo "Auth state fully cleared. Neo4j will reinitialize with credentials from NEO4J_AUTH." >&2
       ;;
   esac
 }

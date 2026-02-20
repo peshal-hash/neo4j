@@ -14,7 +14,7 @@ param imageTag string = 'latest'
 param neo4jAuthSecretName string = 'NEO4J-AUTH'
 
 @description('If true, create a new Storage Account + File Share. NOTE: this template will NOT store its key anywhere.')
-param createStorage bool = false
+param createStorage bool = true
 
 @description('Optional: If createStorage=false, provide an existing storage account name (lowercase, 3-24 chars).')
 param storageAccountName string = ''
