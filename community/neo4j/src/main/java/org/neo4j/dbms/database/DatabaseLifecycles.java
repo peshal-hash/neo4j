@@ -128,10 +128,7 @@ public final class DatabaseLifecycles {
     }
 
     private void checkDatabaseLimit(NamedDatabaseId namedDatabaseId) {
-        if (databaseRepository.registeredDatabases().size() >= 2) {
-            throw new DatabaseManagementException(
-                    "Default database already exists. Fail to create another: " + namedDatabaseId);
-        }
+        // Database limit removed: multiple databases are supported in community edition
     }
 
     private class SystemDatabaseStarter extends LifecycleAdapter {

@@ -21,6 +21,7 @@ package org.neo4j.cypher.internal
 
 import org.neo4j.common.DependencyResolver
 import org.neo4j.configuration.Config
+import org.neo4j.cypher.internal.AdministrationCommandRuntime.getNameFields
 import org.neo4j.cypher.internal.AdministrationCommandRuntime.internalKey
 import org.neo4j.cypher.internal.AdministrationCommandRuntime.makeRenameExecutionPlan
 import org.neo4j.cypher.internal.AdministrationCommandRuntime.runtimeStringValue
@@ -63,7 +64,12 @@ import org.neo4j.cypher.internal.logical.plans.SetOwnPassword
 import org.neo4j.cypher.internal.logical.plans.ShowCurrentUser
 import org.neo4j.cypher.internal.logical.plans.ShowDatabase
 import org.neo4j.cypher.internal.logical.plans.ShowUsers
+import org.neo4j.cypher.internal.logical.plans.AssertManagementActionNotBlocked
+import org.neo4j.cypher.internal.logical.plans.CreateDatabase
+import org.neo4j.cypher.internal.logical.plans.EnsureNameIsNotAmbiguous
+import org.neo4j.cypher.internal.logical.plans.EnsureValidNumberOfDatabases
 import org.neo4j.cypher.internal.logical.plans.SystemProcedureCall
+import org.neo4j.cypher.internal.logical.plans.WaitForCompletion
 import org.neo4j.cypher.internal.procs.ActionMapper
 import org.neo4j.cypher.internal.procs.AuthorizationAndPredicateExecutionPlan
 import org.neo4j.cypher.internal.procs.Continue
@@ -74,6 +80,8 @@ import org.neo4j.cypher.internal.procs.SystemCommandExecutionPlan
 import org.neo4j.cypher.internal.procs.ThrowException
 import org.neo4j.cypher.internal.procs.UpdatingSystemCommandExecutionPlan
 import org.neo4j.cypher.rendering.QueryRenderer
+import org.neo4j.dbms.systemgraph.TopologyGraphDbmsModel.DATABASE_LABEL
+import org.neo4j.dbms.systemgraph.TopologyGraphDbmsModel.DATABASE_NAME_LABEL
 import org.neo4j.exceptions.CantCompileQueryException
 import org.neo4j.exceptions.CypherExecutionException
 import org.neo4j.exceptions.DatabaseAdministrationOnFollowerException
@@ -90,9 +98,12 @@ import org.neo4j.internal.kernel.api.security.SecurityContext
 import org.neo4j.internal.kernel.api.security.Segment
 import org.neo4j.kernel.api.exceptions.Status
 import org.neo4j.kernel.api.exceptions.Status.HasStatus
+import org.neo4j.kernel.database.NormalizedDatabaseName
 import org.neo4j.kernel.impl.api.security.RestrictedAccessMode
 import org.neo4j.kernel.impl.query.TransactionalContext.DatabaseMode
 import org.neo4j.server.security.systemgraph.UserSecurityGraphComponent
+import java.util.UUID
+import org.neo4j.values.AnyValue
 import org.neo4j.values.storable.BooleanValue
 import org.neo4j.values.storable.TextValue
 import org.neo4j.values.storable.Values
@@ -461,6 +472,75 @@ case class CommunityAdministrationCommandRuntime(
           // from leaking nodes from the system graph: the ()--() would return empty results
           modeConverter = s => s.withMode(new RestrictedAccessMode(s.mode(), AccessMode.Static.ACCESS))
         )
+
+    // Management actions are never blocked in community edition
+    case AssertManagementActionNotBlocked(_) => _ =>
+        AuthorizationAndPredicateExecutionPlan(
+          securityAuthorizationHandler,
+          (_, _) => Seq((null, PermissionState.EXPLICIT_GRANT)),
+          violationMessage = adminActionErrorMessage
+        )
+
+    // In community edition there is only one namespace, so names are never ambiguous
+    case EnsureNameIsNotAmbiguous(source, _, _) => context =>
+        fullLogicalToExecutable.applyOrElse(source, throwCantCompile).apply(context)
+
+    // CREATE [OR REPLACE] DATABASE foo [IF NOT EXISTS] - write the database entry to the system graph
+    case createDb: CreateDatabase => context =>
+        val sourcePlan: Option[ExecutionPlan] =
+          Some(fullLogicalToExecutable.applyOrElse(createDb.source, throwCantCompile).apply(context))
+        val dbNameFields = getNameFields("dbName", createDb.databaseName, new NormalizedDatabaseName(_).name())
+        val uuidKey = internalKey("uuid")
+        val uuidValue = Values.utf8Value(UUID.randomUUID().toString)
+        val database = DATABASE_LABEL.name()
+        val databaseName = DATABASE_NAME_LABEL.name()
+        UpdatingSystemCommandExecutionPlan(
+          "CreateDatabase",
+          normalExecutionEngine,
+          securityAuthorizationHandler,
+          s"""CREATE (db:$database {
+             |  name: $$`${dbNameFields.nameKey}`,
+             |  uuid: $$`$uuidKey`,
+             |  status: 'online',
+             |  access: 'read-write',
+             |  default: false,
+             |  created_at: datetime(),
+             |  started_at: datetime(),
+             |  store_random_id: toInteger(rand() * 9007199254740992)
+             |})
+             |WITH db
+             |CREATE (:$databaseName {
+             |  name: $$`${dbNameFields.nameKey}`,
+             |  namespace: 'system-root',
+             |  displayName: $$`${dbNameFields.nameKey}`,
+             |  primary: true
+             |})-[:TARGETS]->(db)
+             |RETURN db.name""".stripMargin,
+          VirtualValues.map(
+            Array(dbNameFields.nameKey, uuidKey),
+            Array[AnyValue](dbNameFields.nameValue, uuidValue)
+          ),
+          QueryHandler
+            .handleNoResult(_ =>
+              Some(ThrowException(new InvalidArgumentException("Failed to create the specified database.")))
+            )
+            .handleError { (error, _) =>
+              new InvalidArgumentException(
+                s"Failed to create the specified database: ${error.getMessage}",
+                error
+              )
+            },
+          sourcePlan,
+          parameterTransformer = ParameterTransformer().convert(dbNameFields.nameConverter)
+        )
+
+    // Database count limit is bypassed in community edition to allow multiple databases
+    case EnsureValidNumberOfDatabases(source) => context =>
+        fullLogicalToExecutable.applyOrElse(source, throwCantCompile).apply(context)
+
+    // Wait for completion is a no-op in community edition (no cluster coordination)
+    case WaitForCompletion(source, _, _) => context =>
+        fullLogicalToExecutable.applyOrElse(source, throwCantCompile).apply(context)
 
     // Ignore the log command in community
     case LogSystemCommand(source, _) => context =>
