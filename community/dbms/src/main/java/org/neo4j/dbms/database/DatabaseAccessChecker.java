@@ -23,6 +23,7 @@ package org.neo4j.dbms.database;
  * Checks whether a user is allowed to open transactions against a specific database.
  * Implemented by DatabaseLifecycles in the community edition.
  */
+@FunctionalInterface
 public interface DatabaseAccessChecker {
     /**
      * Returns true if the given user is permitted to access the given database.
@@ -37,10 +38,10 @@ public interface DatabaseAccessChecker {
      * This updates only the in-memory access map; the caller is responsible for
      * persisting the corresponding {@code HAS_ACCESS} relationship in the system graph.
      */
-    void grantUserAccessToDatabase(String username, String databaseName);
+    default void grantUserAccessToDatabase(String username, String databaseName) {}
 
     /**
      * Removes the in-memory access grant for {@code username} on {@code databaseName}.
      */
-    void revokeUserAccessToDatabase(String username, String databaseName);
+    default void revokeUserAccessToDatabase(String username, String databaseName) {}
 }
