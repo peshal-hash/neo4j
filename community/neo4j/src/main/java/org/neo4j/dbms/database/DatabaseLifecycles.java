@@ -209,17 +209,19 @@ public final class DatabaseLifecycles implements DatabaseRuntimeManager, Databas
                     }
                     // Rebuild the in-memory access map from HAS_ACCESS relationships in the
                     // system graph, regardless of whether this is a new or already-loaded DB.
+                    // getRelationships() returns ResourceIterable — use try-with-resources +
+                    // for-each (it implements Iterable, not Iterator directly).
                     if (isExtra) {
-                        var rels = node.getRelationships(Direction.INCOMING, HAS_ACCESS_REL);
-                        while (rels.hasNext()) {
-                            var rel = rels.next();
-                            var userNode = rel.getStartNode();
-                            if (userNode.hasLabel(USER_NODE_LABEL)) {
-                                var username = (String) userNode.getProperty("name", null);
-                                if (username != null && !username.isEmpty()) {
-                                    databaseUserAccess
-                                            .computeIfAbsent(name, k -> ConcurrentHashMap.newKeySet())
-                                            .add(username);
+                        try (var rels = node.getRelationships(Direction.INCOMING, HAS_ACCESS_REL)) {
+                            for (var rel : rels) {
+                                var userNode = rel.getStartNode();
+                                if (userNode.hasLabel(USER_NODE_LABEL)) {
+                                    var username = (String) userNode.getProperty("name", null);
+                                    if (username != null && !username.isEmpty()) {
+                                        databaseUserAccess
+                                                .computeIfAbsent(name, k -> ConcurrentHashMap.newKeySet())
+                                                .add(username);
+                                    }
                                 }
                             }
                         }
