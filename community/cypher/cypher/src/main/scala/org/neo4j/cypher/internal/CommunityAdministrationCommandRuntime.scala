@@ -72,7 +72,7 @@ import org.neo4j.cypher.internal.logical.plans.EnsureNameIsNotAmbiguous
 import org.neo4j.cypher.internal.logical.plans.EnsureValidNumberOfDatabases
 import org.neo4j.cypher.internal.logical.plans.SystemProcedureCall
 import org.neo4j.cypher.internal.logical.plans.WaitForCompletion
-import org.neo4j.dbms.database.DatabaseLifecycles
+import org.neo4j.dbms.database.DatabaseRuntimeManager
 import org.neo4j.cypher.internal.procs.ActionMapper
 import org.neo4j.cypher.internal.procs.AuthorizationAndPredicateExecutionPlan
 import org.neo4j.cypher.internal.procs.Continue
@@ -132,8 +132,8 @@ case class CommunityAdministrationCommandRuntime(
   private lazy val userSecurity: UserSecurityGraphComponent =
     resolver.resolveDependency(classOf[UserSecurityGraphComponent])
 
-  private lazy val databaseLifecycles: DatabaseLifecycles =
-    resolver.resolveDependency(classOf[DatabaseLifecycles])
+  private lazy val databaseLifecycles: DatabaseRuntimeManager =
+    resolver.resolveDependency(classOf[DatabaseRuntimeManager])
 
   def throwCantCompile(unknownPlan: LogicalPlan): Nothing = {
     throw new CantCompileQueryException(

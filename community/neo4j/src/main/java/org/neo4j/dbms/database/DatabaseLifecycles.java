@@ -41,7 +41,7 @@ import org.neo4j.logging.LogProvider;
 /**
  * System and default database manged only by lifecycles.
  */
-public final class DatabaseLifecycles {
+public final class DatabaseLifecycles implements DatabaseRuntimeManager {
     private final DatabaseRepository<StandaloneDatabaseContext> databaseRepository;
     private final String defaultDatabaseName;
     private final DatabaseContextFactory<StandaloneDatabaseContext, Optional<?>> databaseContextFactory;
