@@ -238,6 +238,7 @@ deploy_infrastructure() {
       configureEnvStorage="${CONFIGURE_ENV_STORAGE:-true}" \
       createStorage="${CREATE_STORAGE:-true}" \
     "${debug_flag[@]}" \
+    >&2 \
     2> >(tee "${AZ_ERR_LOG}" >&2)
 
   ok "Bicep deployment completed."
