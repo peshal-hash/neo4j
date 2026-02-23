@@ -153,6 +153,29 @@ public final class DatabaseLifecycles implements DatabaseRuntimeManager, Databas
     }
 
     @Override
+    public boolean canUserDropDatabase(String username, String databaseName) {
+        if (databaseName == null || databaseName.isEmpty()) {
+            return false;
+        }
+        // Auth is disabled — keep existing permissive behaviour.
+        if (username == null || username.isEmpty()) {
+            return true;
+        }
+        // Built-in admin can always drop databases.
+        if (AuthManager.INITIAL_USER_NAME.equals(username)) {
+            return true;
+        }
+        // Let normal "database does not exist" semantics handle unknown names,
+        // including DROP DATABASE ... IF EXISTS.
+        if (databaseRepository.databaseIdRepository().getByName(databaseName).isEmpty()) {
+            return true;
+        }
+        // Non-admin users may only drop databases explicitly linked to them.
+        Set<String> allowed = databaseUserAccess.get(databaseName);
+        return allowed != null && allowed.contains(username);
+    }
+
+    @Override
     public void grantUserAccessToDatabase(String username, String databaseName) {
         if (username == null || username.isEmpty() || databaseName == null || databaseName.isEmpty()) {
             return;

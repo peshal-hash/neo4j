@@ -33,6 +33,10 @@ public interface DatabaseAccessChecker {
      */
     boolean canUserAccessDatabase(String username, String databaseName);
 
+    default boolean canUserDropDatabase(String username, String databaseName) {
+        return canUserAccessDatabase(username, databaseName);
+    }
+
     /**
      * Records that {@code username} is allowed to access {@code databaseName}.
      * This updates only the in-memory access map; the caller is responsible for

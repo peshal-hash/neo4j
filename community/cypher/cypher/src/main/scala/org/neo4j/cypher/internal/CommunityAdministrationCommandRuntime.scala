@@ -290,10 +290,25 @@ case class CommunityAdministrationCommandRuntime(
           source = getSource(maybeSource, context)
         )
 
-    // Community custom multi-database flow: planner inserts AssertCanDropDatabase
-    // before DROP DATABASE; treat it as pass-through to preserve that chain.
-    case AssertCanDropDatabase(source, _, _) => context =>
-        fullLogicalToExecutable.applyOrElse(source, throwCantCompile).apply(context)
+    // Community custom multi-database flow: only the linked user (HAS_ACCESS) or
+    // built-in admin may drop a database.
+    case AssertCanDropDatabase(source, databaseName, _) => context =>
+        PredicateExecutionPlan(
+          (params, sc) => {
+            val dbName = runtimeStringValue(databaseName, params)
+            val username = sc.subject().executingUser()
+            databaseAccessChecker.canUserDropDatabase(username, dbName)
+          },
+          onViolation = (params, _, sc) => {
+            val dbName = runtimeStringValue(databaseName, params)
+            val username = sc.subject().executingUser()
+            new AuthorizationViolationException(
+              s"Permission denied to DROP DATABASE '$dbName' for user '$username'. " +
+                "Only the linked user or admin can drop this database."
+            )
+          },
+          source = Some(fullLogicalToExecutable.applyOrElse(source, throwCantCompile).apply(context))
+        )
 
     // SHOW USERS
     case ShowUsers(source, withAuth, symbols, yields, returns) => context =>
