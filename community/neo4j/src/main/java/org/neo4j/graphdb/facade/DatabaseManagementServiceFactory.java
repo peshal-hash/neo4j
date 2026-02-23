@@ -53,6 +53,7 @@ import org.neo4j.dbms.DatabaseStateService;
 import org.neo4j.dbms.admissioncontrol.AdmissionControlService;
 import org.neo4j.dbms.admissioncontrol.NoopAdmissionControlService;
 import org.neo4j.dbms.api.DatabaseManagementService;
+import org.neo4j.dbms.database.DatabaseAccessChecker;
 import org.neo4j.dbms.database.DatabaseContext;
 import org.neo4j.dbms.database.DatabaseContextProvider;
 import org.neo4j.dbms.database.DatabaseManagementServiceImpl;
@@ -198,8 +199,13 @@ public class DatabaseManagementServiceFactory {
         BoltGraphDatabaseManagementServiceSPI boltGraphDatabaseManagementServiceSPI =
                 edition.createBoltDatabaseManagementServiceProvider();
 
-        var transactionManager =
-                new TransactionManagerImpl(boltGraphDatabaseManagementServiceSPI, globalModule.getGlobalClock());
+        var transactionManager = new TransactionManagerImpl(
+                boltGraphDatabaseManagementServiceSPI,
+                globalModule.getGlobalClock(),
+                // Resolve DatabaseAccessChecker lazily: DatabaseLifecycles (which implements
+                // it) is registered later during the lifecycle start, so we must not resolve
+                // it eagerly at construction time.
+                () -> globalDependencies.resolveDependency(DatabaseAccessChecker.class));
         globalDependencies.satisfyDependency(transactionManager);
 
         var acs =

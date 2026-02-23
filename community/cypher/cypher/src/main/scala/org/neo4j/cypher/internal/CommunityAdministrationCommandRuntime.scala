@@ -498,6 +498,7 @@ case class CommunityAdministrationCommandRuntime(
         val dbNameFields = getNameFields("dbName", createDb.databaseName, new NormalizedDatabaseName(_).name())
         val uuidKey = internalKey("uuid")
         val uuidValue = Values.utf8Value(UUID.randomUUID().toString)
+        val currentUserKey = internalKey("currentUser")
         val database = DATABASE_LABEL.name()
         val databaseName = DATABASE_NAME_LABEL.name()
         UpdatingSystemCommandExecutionPlan(
@@ -521,17 +522,25 @@ case class CommunityAdministrationCommandRuntime(
              |  displayName: $$`${dbNameFields.nameKey}`,
              |  primary: true
              |})-[:TARGETS]->(db)
+             |WITH db
+             |OPTIONAL MATCH (u:User {name: $$`$currentUserKey`})
+             |FOREACH (_ IN CASE WHEN u IS NOT NULL THEN [1] ELSE [] END |
+             |  MERGE (u)-[:HAS_ACCESS]->(db))
              |RETURN db.name""".stripMargin,
           VirtualValues.map(
             Array(dbNameFields.nameKey, uuidKey),
             Array[AnyValue](dbNameFields.nameValue, uuidValue)
           ),
           QueryHandler
-            .handleResult { (offset, value, _) =>
+            .handleResult { (offset, value, params) =>
               if (offset == 0) {
                 val dbName = value.asInstanceOf[TextValue].stringValue()
+                val owner = params.get(currentUserKey) match {
+                  case tv: TextValue => tv.stringValue()
+                  case _             => ""
+                }
                 try {
-                  databaseLifecycles.createAndStartDatabase(dbName, uuidValue.stringValue())
+                  databaseLifecycles.createAndStartDatabase(dbName, uuidValue.stringValue(), owner)
                 } catch {
                   case _: Exception => // failure already logged inside createAndStartDatabase
                 }
@@ -548,7 +557,14 @@ case class CommunityAdministrationCommandRuntime(
               )
             },
           sourcePlan,
-          parameterTransformer = ParameterTransformer().convert(dbNameFields.nameConverter)
+          parameterTransformer = ParameterTransformer()
+            .convert(dbNameFields.nameConverter)
+            .generate((_, sc, _) =>
+              VirtualValues.map(
+                Array(currentUserKey),
+                Array[AnyValue](Values.utf8Value(sc.subject().executingUser()))
+              )
+            )
         )
 
     // Database count limit is bypassed in community edition to allow multiple databases
