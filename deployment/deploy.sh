@@ -165,16 +165,32 @@ cleanup_existing_storage_config() {
     --query "name" -o tsv 2> >(tee "${AZ_ERR_LOG}" >&2) || echo "")
 
   if [[ -n "${storage_exists}" ]]; then
-    info "Found existing storage config. Scaling '${NEO4J_APP_NAME}' to 0 replicas to release the mount..."
-    az containerapp update \
+    info "Found existing storage config. Deactivating '${NEO4J_APP_NAME}' revisions to release the mount..."
+    # --max-replicas 0 is invalid (range [1,1000]); deactivating revisions is the correct
+    # way to stop all running instances so the Azure Files mount is released.
+    local active_revisions
+    active_revisions=$(az containerapp revision list \
       --name "${NEO4J_APP_NAME}" \
       --resource-group "${RESOURCE_GROUP}" \
-      --min-replicas 0 \
-      --max-replicas 0 \
-      2> >(tee "${AZ_ERR_LOG}" >&2) || true
+      --query "[?properties.active].name" -o tsv \
+      2>/dev/null || echo "")
 
-    info "Waiting 15s for container to stop..."
-    sleep 15
+    if [[ -n "${active_revisions}" ]]; then
+      while IFS= read -r rev; do
+        [[ -z "${rev}" ]] && continue
+        info "Deactivating revision: ${rev}"
+        az containerapp revision deactivate \
+          --revision "${rev}" \
+          --name "${NEO4J_APP_NAME}" \
+          --resource-group "${RESOURCE_GROUP}" \
+          2> >(tee "${AZ_ERR_LOG}" >&2) || true
+      done <<< "${active_revisions}"
+    else
+      info "No active revisions found; container is already stopped."
+    fi
+
+    info "Waiting 30s for container to stop and release the mount..."
+    sleep 30
 
     info "Removing storage config..."
     az containerapp env storage remove \
