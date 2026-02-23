@@ -26,16 +26,19 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import org.neo4j.bolt.dbapi.BoltGraphDatabaseManagementServiceSPI;
 import org.neo4j.bolt.dbapi.BoltGraphDatabaseServiceSPI;
 import org.neo4j.bolt.dbapi.BoltTransaction;
 import org.neo4j.bolt.protocol.common.connector.tx.TransactionOwner;
 import org.neo4j.bolt.protocol.common.message.AccessMode;
+import org.neo4j.bolt.tx.error.DatabaseAccessDeniedException;
 import org.neo4j.bolt.tx.error.DatabaseUnavailableTransactionCreationException;
 import org.neo4j.bolt.tx.error.NoSuchDatabaseTransactionCreationException;
 import org.neo4j.bolt.tx.error.TransactionCreationException;
 import org.neo4j.bolt.tx.error.TransactionException;
 import org.neo4j.dbms.api.DatabaseNotFoundException;
+import org.neo4j.dbms.database.DatabaseAccessChecker;
 import org.neo4j.kernel.api.KernelTransaction.Type;
 import org.neo4j.kernel.availability.UnavailableException;
 import org.neo4j.kernel.impl.query.NotificationConfiguration;
@@ -45,13 +48,31 @@ public class TransactionManagerImpl implements TransactionManager {
     private final BoltGraphDatabaseManagementServiceSPI graphDatabaseManagementService;
     private final Clock clock;
     private final AtomicLong nextTransactionId = new AtomicLong(1);
+    private final Supplier<DatabaseAccessChecker> accessCheckerSupplier;
 
     private final Map<String, Transaction> transactionMap = new ConcurrentHashMap<>();
     private final CleanupListener cleanupListener = new CleanupListener();
 
-    public TransactionManagerImpl(BoltGraphDatabaseManagementServiceSPI graphDatabaseManagementService, Clock clock) {
+    /**
+     * Constructor with database-access enforcement. The supplier is invoked lazily so
+     * that {@link DatabaseAccessChecker} need not be registered before this manager is
+     * constructed.
+     */
+    public TransactionManagerImpl(
+            BoltGraphDatabaseManagementServiceSPI graphDatabaseManagementService,
+            Clock clock,
+            Supplier<DatabaseAccessChecker> accessCheckerSupplier) {
         this.graphDatabaseManagementService = graphDatabaseManagementService;
         this.clock = clock;
+        this.accessCheckerSupplier = accessCheckerSupplier;
+    }
+
+    /**
+     * Backward-compatible constructor used in tests and non-access-controlled contexts.
+     * All database access is permitted when this constructor is used.
+     */
+    public TransactionManagerImpl(BoltGraphDatabaseManagementServiceSPI graphDatabaseManagementService, Clock clock) {
+        this(graphDatabaseManagementService, clock, () -> (username, databaseName) -> true);
     }
 
     @Override
@@ -81,6 +102,13 @@ public class TransactionManagerImpl implements TransactionManager {
         var db = databaseName;
         if (db == null || databaseName.isEmpty()) {
             db = owner.selectedDefaultDatabase();
+        }
+
+        // Enforce per-user database access.
+        // Empty username means auth is disabled — skip the check in that case.
+        var username = owner.loginContext().subject().executingUser();
+        if (!username.isEmpty() && !accessCheckerSupplier.get().canUserAccessDatabase(username, db)) {
+            throw new DatabaseAccessDeniedException(username, db);
         }
 
         var kernelType =

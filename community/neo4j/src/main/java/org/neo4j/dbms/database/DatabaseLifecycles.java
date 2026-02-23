@@ -26,10 +26,16 @@ import static org.neo4j.kernel.database.NamedDatabaseId.SYSTEM_DATABASE_NAME;
 
 import java.util.ArrayList;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.neo4j.dbms.api.DatabaseManagementException;
 import org.neo4j.dbms.api.DatabaseNotFoundHelper;
 import org.neo4j.dbms.systemgraph.TopologyGraphDbmsModel;
+import org.neo4j.graphdb.Direction;
+import org.neo4j.graphdb.Label;
+import org.neo4j.graphdb.RelationshipType;
+import org.neo4j.kernel.api.security.AuthManager;
 import org.neo4j.kernel.database.Database;
 import org.neo4j.kernel.database.DatabaseIdFactory;
 import org.neo4j.kernel.database.NamedDatabaseId;
@@ -41,11 +47,21 @@ import org.neo4j.logging.LogProvider;
 /**
  * System and default database manged only by lifecycles.
  */
-public final class DatabaseLifecycles implements DatabaseRuntimeManager {
+public final class DatabaseLifecycles implements DatabaseRuntimeManager, DatabaseAccessChecker {
+    private static final Label USER_NODE_LABEL = Label.label("User");
+    private static final RelationshipType HAS_ACCESS_REL = RelationshipType.withName("HAS_ACCESS");
+
     private final DatabaseRepository<StandaloneDatabaseContext> databaseRepository;
     private final String defaultDatabaseName;
     private final DatabaseContextFactory<StandaloneDatabaseContext, Optional<?>> databaseContextFactory;
     private final Log log;
+
+    /**
+     * In-memory map: database name → set of usernames that may access it.
+     * Populated when databases are created at runtime or on startup via
+     * {@link #initialiseAdditionalDatabases()}.
+     */
+    private final ConcurrentHashMap<String, Set<String>> databaseUserAccess = new ConcurrentHashMap<>();
 
     public DatabaseLifecycles(
             DatabaseRepository<StandaloneDatabaseContext> databaseRepository,
@@ -93,6 +109,53 @@ public final class DatabaseLifecycles implements DatabaseRuntimeManager {
         startDatabase(context);
     }
 
+    // -------------------------------------------------------------------------
+    // DatabaseAccessChecker implementation
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns {@code true} when the given user is permitted to open transactions against
+     * the given database.
+     *
+     * <p>Always grants access for:
+     * <ul>
+     *   <li>auth-disabled connections (empty username)</li>
+     *   <li>the built-in admin user ({@code neo4j})</li>
+     *   <li>the {@code system} database (needed for admin commands)</li>
+     *   <li>the default database (shared general-purpose database)</li>
+     * </ul>
+     * For every other database, access is granted only when the user appears in the
+     * in-memory {@link #databaseUserAccess} map (populated on database creation or
+     * server startup).
+     */
+    @Override
+    public boolean canUserAccessDatabase(String username, String databaseName) {
+        // Auth is disabled — allow everything.
+        if (username == null || username.isEmpty()) {
+            return true;
+        }
+        // The built-in admin user always has unrestricted access.
+        if (AuthManager.INITIAL_USER_NAME.equals(username)) {
+            return true;
+        }
+        // The system database must be reachable by all authenticated users so that
+        // administration commands (CREATE DATABASE, SHOW DATABASES, …) can be executed.
+        if ("system".equals(databaseName)) {
+            return true;
+        }
+        // The default (shared) database retains its original behaviour.
+        if (defaultDatabaseName.equals(databaseName)) {
+            return true;
+        }
+        // Custom databases: consult the in-memory access map.
+        Set<String> allowed = databaseUserAccess.get(databaseName);
+        return allowed != null && allowed.contains(username);
+    }
+
+    // -------------------------------------------------------------------------
+    // DatabaseRuntimeManager implementation
+    // -------------------------------------------------------------------------
+
     /**
      * Stops and removes a database from the runtime registry without requiring a server restart.
      * Also idempotent — silently skips if the database is not currently loaded.
@@ -102,17 +165,25 @@ public final class DatabaseLifecycles implements DatabaseRuntimeManager {
             stopDatabase(context);
             databaseRepository.remove(context.database().getNamedDatabaseId());
         });
+        databaseUserAccess.remove(name);
     }
 
     /**
-     * Creates and starts a database at runtime without requiring a server restart.
-     * Safe to call concurrently — skips silently if the database is already loaded.
+     * Creates and starts a database at runtime, recording {@code ownerUsername} as an
+     * authorised accessor. Safe to call concurrently — skips silently if the database
+     * is already loaded.
      */
-    public synchronized void createAndStartDatabase(String name, String uuidStr) {
+    @Override
+    public synchronized void createAndStartDatabase(String name, String uuidStr, String ownerUsername) {
         var namedDatabaseId = DatabaseIdFactory.from(name, UUID.fromString(uuidStr));
         if (databaseRepository.getDatabaseContext(namedDatabaseId).isEmpty()) {
             var context = createDatabase(namedDatabaseId);
             startDatabase(context);
+        }
+        if (ownerUsername != null && !ownerUsername.isEmpty()) {
+            databaseUserAccess
+                    .computeIfAbsent(name, k -> ConcurrentHashMap.newKeySet())
+                    .add(ownerUsername);
         }
     }
 
@@ -134,6 +205,23 @@ public final class DatabaseLifecycles implements DatabaseRuntimeManager {
                             startDatabase(context);
                         } catch (Exception e) {
                             log.error("Failed to initialise additional database '" + name + "'", e);
+                        }
+                    }
+                    // Rebuild the in-memory access map from HAS_ACCESS relationships in the
+                    // system graph, regardless of whether this is a new or already-loaded DB.
+                    if (isExtra) {
+                        var rels = node.getRelationships(Direction.INCOMING, HAS_ACCESS_REL);
+                        while (rels.hasNext()) {
+                            var rel = rels.next();
+                            var userNode = rel.getStartNode();
+                            if (userNode.hasLabel(USER_NODE_LABEL)) {
+                                var username = (String) userNode.getProperty("name", null);
+                                if (username != null && !username.isEmpty()) {
+                                    databaseUserAccess
+                                            .computeIfAbsent(name, k -> ConcurrentHashMap.newKeySet())
+                                            .add(username);
+                                }
+                            }
                         }
                     }
                 }

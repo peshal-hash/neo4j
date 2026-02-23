@@ -25,10 +25,18 @@ package org.neo4j.dbms.database;
  */
 public interface DatabaseRuntimeManager {
     /**
-     * Creates and starts a database at runtime.
+     * Creates and starts a database at runtime, attributing ownership to {@code ownerUsername}.
      * Safe to call concurrently — silently skips if the database is already loaded.
      */
-    void createAndStartDatabase(String name, String uuidStr);
+    void createAndStartDatabase(String name, String uuidStr, String ownerUsername);
+
+    /**
+     * Creates and starts a database at runtime with no specific owner (admin-only access).
+     * Delegates to {@link #createAndStartDatabase(String, String, String)} with an empty owner.
+     */
+    default void createAndStartDatabase(String name, String uuidStr) {
+        createAndStartDatabase(name, uuidStr, "");
+    }
 
     /**
      * Stops and removes a database from the runtime registry.
