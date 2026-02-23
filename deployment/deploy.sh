@@ -165,7 +165,18 @@ cleanup_existing_storage_config() {
     --query "name" -o tsv 2> >(tee "${AZ_ERR_LOG}" >&2) || echo "")
 
   if [[ -n "${storage_exists}" ]]; then
-    info "Found existing storage config. Removing to avoid update conflicts..."
+    info "Found existing storage config. Scaling '${NEO4J_APP_NAME}' to 0 replicas to release the mount..."
+    az containerapp update \
+      --name "${NEO4J_APP_NAME}" \
+      --resource-group "${RESOURCE_GROUP}" \
+      --min-replicas 0 \
+      --max-replicas 0 \
+      2> >(tee "${AZ_ERR_LOG}" >&2) || true
+
+    info "Waiting 15s for container to stop..."
+    sleep 15
+
+    info "Removing storage config..."
     az containerapp env storage remove \
       --name "${ENVIRONMENT_NAME}" \
       --resource-group "${RESOURCE_GROUP}" \
