@@ -190,6 +190,7 @@ public class CommunityEditionModule extends AbstractEditionModule implements Def
         globalModule.getGlobalLife().add(databaseLifecycles.systemDatabaseStarter());
         globalModule.getGlobalLife().add(databaseLifecycles.allDatabaseShutdown());
         globalModule.getGlobalDependencies().satisfyDependency(delegate(databaseRepository));
+        globalModule.getGlobalDependencies().satisfyDependency(databaseLifecycles);
         globalModule.getGlobalDependencies().satisfyDependency(databaseStateService);
 
         globalModule

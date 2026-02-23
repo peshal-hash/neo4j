@@ -66,10 +66,13 @@ import org.neo4j.cypher.internal.logical.plans.ShowDatabase
 import org.neo4j.cypher.internal.logical.plans.ShowUsers
 import org.neo4j.cypher.internal.logical.plans.AssertManagementActionNotBlocked
 import org.neo4j.cypher.internal.logical.plans.CreateDatabase
+import org.neo4j.cypher.internal.logical.plans.DropDatabase
+import org.neo4j.cypher.internal.logical.plans.EnsureDatabaseSafeToDelete
 import org.neo4j.cypher.internal.logical.plans.EnsureNameIsNotAmbiguous
 import org.neo4j.cypher.internal.logical.plans.EnsureValidNumberOfDatabases
 import org.neo4j.cypher.internal.logical.plans.SystemProcedureCall
 import org.neo4j.cypher.internal.logical.plans.WaitForCompletion
+import org.neo4j.dbms.database.DatabaseLifecycles
 import org.neo4j.cypher.internal.procs.ActionMapper
 import org.neo4j.cypher.internal.procs.AuthorizationAndPredicateExecutionPlan
 import org.neo4j.cypher.internal.procs.Continue
@@ -128,6 +131,9 @@ case class CommunityAdministrationCommandRuntime(
 
   private lazy val userSecurity: UserSecurityGraphComponent =
     resolver.resolveDependency(classOf[UserSecurityGraphComponent])
+
+  private lazy val databaseLifecycles: DatabaseLifecycles =
+    resolver.resolveDependency(classOf[DatabaseLifecycles])
 
   def throwCantCompile(unknownPlan: LogicalPlan): Nothing = {
     throw new CantCompileQueryException(
@@ -502,7 +508,7 @@ case class CommunityAdministrationCommandRuntime(
              |  name: $$`${dbNameFields.nameKey}`,
              |  uuid: $$`$uuidKey`,
              |  status: 'online',
-             |  access: 'read-write',
+             |  access: 'READ_WRITE',
              |  default: false,
              |  created_at: datetime(),
              |  started_at: datetime(),
@@ -521,6 +527,17 @@ case class CommunityAdministrationCommandRuntime(
             Array[AnyValue](dbNameFields.nameValue, uuidValue)
           ),
           QueryHandler
+            .handleResult { (offset, value, _) =>
+              if (offset == 0) {
+                val dbName = value.asInstanceOf[TextValue].stringValue()
+                try {
+                  databaseLifecycles.createAndStartDatabase(dbName, uuidValue.stringValue())
+                } catch {
+                  case _: Exception => // failure already logged inside createAndStartDatabase
+                }
+              }
+              Continue
+            }
             .handleNoResult(_ =>
               Some(ThrowException(new InvalidArgumentException("Failed to create the specified database.")))
             )
@@ -541,6 +558,52 @@ case class CommunityAdministrationCommandRuntime(
     // Wait for completion is a no-op in community edition (no cluster coordination)
     case WaitForCompletion(source, _, _) => context =>
         fullLogicalToExecutable.applyOrElse(source, throwCantCompile).apply(context)
+
+    // Safety checks for drop are pass-through in community (no aliases, no composite dbs)
+    case EnsureDatabaseSafeToDelete(source, _, _) => context =>
+        fullLogicalToExecutable.applyOrElse(source, throwCantCompile).apply(context)
+
+    // DROP DATABASE foo [IF EXISTS] [DESTROY DATA|DUMP DATA]
+    case dropDb: DropDatabase => context =>
+        val sourcePlan: Option[ExecutionPlan] =
+          Some(fullLogicalToExecutable.applyOrElse(dropDb.source, throwCantCompile).apply(context))
+        val dbNameFields = getNameFields("dbName", dropDb.databaseName.asLegacyName, new NormalizedDatabaseName(_).name())
+        val database = DATABASE_LABEL.name()
+        val databaseName = DATABASE_NAME_LABEL.name()
+        UpdatingSystemCommandExecutionPlan(
+          "DropDatabase",
+          normalExecutionEngine,
+          securityAuthorizationHandler,
+          s"""MATCH (db:$database {name: $$`${dbNameFields.nameKey}`})
+             |OPTIONAL MATCH (dn:$databaseName)-[:TARGETS]->(db)
+             |WITH db, dn, db.name AS deletedName
+             |DETACH DELETE db, dn
+             |RETURN deletedName""".stripMargin,
+          VirtualValues.map(
+            Array(dbNameFields.nameKey),
+            Array[AnyValue](dbNameFields.nameValue)
+          ),
+          QueryHandler
+            .handleResult { (offset, value, _) =>
+              if (offset == 0) {
+                val dbName = value.asInstanceOf[TextValue].stringValue()
+                try {
+                  databaseLifecycles.dropDatabase(dbName)
+                } catch {
+                  case _: Exception => // failure already logged inside dropDatabase
+                }
+              }
+              Continue
+            }
+            .handleError { (error, _) =>
+              new InvalidArgumentException(
+                s"Failed to drop the specified database: ${error.getMessage}",
+                error
+              )
+            },
+          sourcePlan,
+          parameterTransformer = ParameterTransformer().convert(dbNameFields.nameConverter)
+        )
 
     // Ignore the log command in community
     case LogSystemCommand(source, _) => context =>
