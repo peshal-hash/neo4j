@@ -31,4 +31,16 @@ public interface DatabaseAccessChecker {
      * @param databaseName the normalised database name
      */
     boolean canUserAccessDatabase(String username, String databaseName);
+
+    /**
+     * Records that {@code username} is allowed to access {@code databaseName}.
+     * This updates only the in-memory access map; the caller is responsible for
+     * persisting the corresponding {@code HAS_ACCESS} relationship in the system graph.
+     */
+    void grantUserAccessToDatabase(String username, String databaseName);
+
+    /**
+     * Removes the in-memory access grant for {@code username} on {@code databaseName}.
+     */
+    void revokeUserAccessToDatabase(String username, String databaseName);
 }

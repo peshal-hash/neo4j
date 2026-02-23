@@ -152,6 +152,25 @@ public final class DatabaseLifecycles implements DatabaseRuntimeManager, Databas
         return allowed != null && allowed.contains(username);
     }
 
+    @Override
+    public void grantUserAccessToDatabase(String username, String databaseName) {
+        if (username == null || username.isEmpty() || databaseName == null || databaseName.isEmpty()) {
+            return;
+        }
+        databaseUserAccess.computeIfAbsent(databaseName, k -> ConcurrentHashMap.newKeySet()).add(username);
+    }
+
+    @Override
+    public void revokeUserAccessToDatabase(String username, String databaseName) {
+        if (username == null || username.isEmpty() || databaseName == null || databaseName.isEmpty()) {
+            return;
+        }
+        Set<String> users = databaseUserAccess.get(databaseName);
+        if (users != null) {
+            users.remove(username);
+        }
+    }
+
     // -------------------------------------------------------------------------
     // DatabaseRuntimeManager implementation
     // -------------------------------------------------------------------------
