@@ -43,4 +43,14 @@ public interface DatabaseRuntimeManager {
      * Idempotent — silently skips if the database is not currently loaded.
      */
     void dropDatabase(String name);
+
+    /**
+     * Stops and removes a database from the runtime registry.
+     *
+     * @param destroyData whether on-disk store files should be deleted.
+     *                    When {@code false}, only runtime metadata is removed.
+     */
+    default void dropDatabase(String name, boolean destroyData) {
+        dropDatabase(name);
+    }
 }

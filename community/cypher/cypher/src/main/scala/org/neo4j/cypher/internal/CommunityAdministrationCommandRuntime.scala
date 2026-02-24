@@ -37,6 +37,7 @@ import org.neo4j.cypher.internal.administration.ShowUsersExecutionPlanner
 import org.neo4j.cypher.internal.administration.SystemProcedureCallPlanner
 import org.neo4j.cypher.internal.ast.AdministrationAction
 import org.neo4j.cypher.internal.ast.DbmsAction
+import org.neo4j.cypher.internal.ast.DumpData
 import org.neo4j.cypher.internal.ast.StartDatabaseAction
 import org.neo4j.cypher.internal.ast.StopDatabaseAction
 import org.neo4j.cypher.internal.ast.UnassignableAction
@@ -813,8 +814,9 @@ case class CommunityAdministrationCommandRuntime(
             .handleResult { (offset, value, _) =>
               if (offset == 0) {
                 val dbName = value.asInstanceOf[TextValue].stringValue()
+                val destroyData = dropDb.additionalAction != DumpData
                 try {
-                  databaseLifecycles.dropDatabase(dbName)
+                  databaseLifecycles.dropDatabase(dbName, destroyData)
                 } catch {
                   case _: Exception => // failure already logged inside dropDatabase
                 }

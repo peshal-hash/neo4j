@@ -24,6 +24,7 @@ import static org.neo4j.function.ThrowingAction.executeAll;
 import static org.neo4j.kernel.database.NamedDatabaseId.NAMED_SYSTEM_DATABASE_ID;
 import static org.neo4j.kernel.database.NamedDatabaseId.SYSTEM_DATABASE_NAME;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Optional;
 import java.util.Set;
@@ -35,6 +36,7 @@ import org.neo4j.dbms.systemgraph.TopologyGraphDbmsModel;
 import org.neo4j.graphdb.Direction;
 import org.neo4j.graphdb.Label;
 import org.neo4j.graphdb.RelationshipType;
+import org.neo4j.io.fs.FileUtils;
 import org.neo4j.kernel.api.security.AuthManager;
 import org.neo4j.kernel.database.Database;
 import org.neo4j.kernel.database.DatabaseIdFactory;
@@ -202,12 +204,50 @@ public final class DatabaseLifecycles implements DatabaseRuntimeManager, Databas
      * Stops and removes a database from the runtime registry without requiring a server restart.
      * Also idempotent — silently skips if the database is not currently loaded.
      */
+    @Override
     public synchronized void dropDatabase(String name) {
-        databaseRepository.getDatabaseContext(name).ifPresent(context -> {
-            stopDatabase(context);
-            databaseRepository.remove(context.database().getNamedDatabaseId());
-        });
+        dropDatabase(name, true);
+    }
+
+    @Override
+    public synchronized void dropDatabase(String name, boolean destroyData) {
+        Path databaseDirectory = null;
+        Path transactionLogsDirectory = null;
+
+        var context = databaseRepository.getDatabaseContext(name);
+        if (context.isPresent()) {
+            var dbLayout = context.get().database().getDatabaseLayout();
+            databaseDirectory = dbLayout.databaseDirectory();
+            transactionLogsDirectory = dbLayout.getTransactionLogsDirectory();
+
+            stopDatabase(context.get());
+            databaseRepository.remove(context.get().database().getNamedDatabaseId());
+        } else if (destroyData) {
+            // Best-effort fallback when runtime context is absent.
+            var dbLayout = systemContext().database().getDatabaseLayout().getNeo4jLayout().databaseLayout(name);
+            databaseDirectory = dbLayout.databaseDirectory();
+            transactionLogsDirectory = dbLayout.getTransactionLogsDirectory();
+        }
+
         databaseUserAccess.remove(name);
+
+        if (destroyData) {
+            deleteDirectoryQuietly(databaseDirectory, "database");
+            deleteDirectoryQuietly(transactionLogsDirectory, "transaction logs");
+        }
+    }
+
+    private void deleteDirectoryQuietly(Path path, String directoryType) {
+        if (path == null) {
+            return;
+        }
+
+        try {
+            FileUtils.deleteDirectory(path);
+            log.info("Deleted " + directoryType + " directory " + path);
+        } catch (Exception e) {
+            log.error("Failed to delete " + directoryType + " directory " + path, e);
+        }
     }
 
     /**
